@@ -1,459 +1,604 @@
 `timescale 1ns / 1ps
-`default_nettype wire
+// `default_nettype wire
 ////////////////////////////////////////////////////////////////////////////////
-// Company: 
+// Company:
 // Engineer: Wenting Zhang
-// 
-// Create Date:    17:30:26 02/08/2018 
-// Module Name:    boy 
+//
+// Create Date:    17:30:26 02/08/2018
+// Module Name:    boy
 // Project Name:   VerilogBoy
-// Description: 
-//   VerilogBoy portable top level file. This is the file connect the CPU and 
+// Description:
+//   VerilogBoy portable top level file. This is the file connect the CPU and
 //   all the peripherals in the LR35902 together.
-// Dependencies: 
+// Dependencies:
 //   cpu
-// Additional Comments: 
+// Additional Comments:
 //   Hardware specific code should be implemented outside of this file
 //   So normally in an implementation, this will not be the top level.
 ////////////////////////////////////////////////////////////////////////////////
 
 module boy(
-    input wire rst, // Async Reset Input
-    input wire clk, // 4.19MHz Clock Input
-    output wire phi, // 1.05MHz Reference Clock Output
-    // Cartridge interface
-    output wire [15:0] a, // Address Bus
-    output wire [7:0] dout,  // Data Bus
-    input wire [7:0] din,
-    output wire wr, // Write Enable
-    output wire rd, // Read Enable
-    // Keyboard input
+    input wire rst,       // 异步复位输入
+    input wire clk,       // 4.19MHz 时钟输入
+    // 卡带接口
+    output cart_phi,      // 1.05MHz 参考时钟输出
+    output [15:0] cart_a, // 地址总线
+    inout [7:0] cart_d,   // 数据总线
+    output cart_d_oe,
+    output cart_nWR,
+    output cart_nRD,
+    output cart_nCS,
+    // 键盘输入 bit7-0: down up left right st sel b a
     input wire [7:0] key,
-    // LCD output
-    output wire hs, // Horizontal Sync Output
-    output wire vs, // Vertical Sync Output
-    output wire cpl, // Pixel Data Latch
-    output wire [1:0] pixel, // Pixel Data
-    output wire valid,
-    // Sound output
-    output reg [15:0] left,
-    output reg [15:0] right,
-    // Debug interface
+    // 联机口
+    output sio_sc_oe,
+    inout sio_sc,
+    output sio_so,
+    input sio_si,
+    // LCD 输出
+    output wire hs,          // 行同步输出
+    output wire vs,          // 场同步输出
+    output wire cpl,         // 像素数据锁存
+    output wire [1:0] pixel, // 像素数据
+    output wire valid,       // de
+    // 声音输出
+    output signed [15:0] left,
+    output signed [15:0] right,
+    // 调试接口
     output wire done,
     output wire fault
-    );
+);
+    
     
     // CPU
-    wire        cpu_rd;            // CPU Read Enable
-    wire        cpu_wr;            // CPU Write Enable
-    reg  [7:0]  cpu_din;           // CPU Data Bus, to CPU
-    wire [7:0]  cpu_dout;          // CPU Data Bus, from CPU
-    wire [15:0] cpu_a;             // CPU Address Bus
-    wire [4:0]  cpu_int_en;        // CPU Interrupt Enable input
-    wire [4:0]  cpu_int_flags_in;  // CPU Interrupt Flags input
-    wire [4:0]  cpu_int_flags_out; // CPU Interrupt Flags output
-    wire [1:0]  cpu_ct;            // 0-3 T cycle number inside one M cycle
+    wire        cpu_rd;            // CPU 读使能
+    wire        cpu_wr;            // CPU 写使能
+    reg  [7:0]  cpu_din;           // 送入 CPU 的数据总线
+    wire [7:0]  cpu_dout;          // 来自 CPU 的数据总线
+    wire [15:0] cpu_a;             // CPU 地址总线
+    wire [4:0]  cpu_int_en;        // CPU 中断使能输入
+    wire [4:0]  cpu_int_flags_in;  // CPU 中断标志输入
+    wire [4:0]  cpu_int_flags_out; // CPU 中断标志输出
+    wire [1:0]  cpu_ct;            // 一个 M 周期内的 T 周期编号 (0-3)
+    wire [1:0]  bus_op;
+    wire        cpu_stop;
     
-    cpu cpu(
-        .clk(clk),
-        .rst(rst),
-        .phi(phi),
-        .ct(cpu_ct),
-        .a(cpu_a),
-        .dout(cpu_dout),
-        .din(cpu_din),
-        .rd(cpu_rd),
-        .wr(cpu_wr),
-        .int_en(cpu_int_en),
-        .int_flags_in(cpu_int_flags_in),
-        .int_flags_out(cpu_int_flags_out),
-        .key_in(key),
-        .done(done),
-        .fault(fault));
-        
+    cpu u_cpu(
+        .clk           (clk),
+        .rst           (rst),
+        .phi           (cart_phi),
+        .ct            (cpu_ct),
+        .bus_op        (bus_op),
+        .a             (cpu_a),
+        .dout          (cpu_dout),
+        .din           (cpu_din),
+        .rd            (cpu_rd),
+        .wr            (cpu_wr),
+        .int_en        (cpu_int_en),
+        .int_flags_in  (cpu_int_flags_in),
+        .int_flags_out (cpu_int_flags_out),
+        .done          (done),
+        .stop          (cpu_stop),
+        .fault         (fault)
+    );
+    
+    
+    
     // High RAM
-    reg [7:0] high_ram [0:127];
-    wire high_ram_rd = cpu_rd;
-    reg high_ram_wr;
-    wire [6:0] high_ram_a = cpu_a[6:0];
-    wire [7:0] high_ram_din = cpu_dout;
-    reg [7:0] high_ram_dout;
-    always @(posedge clk) begin
-        if (high_ram_wr)
-            high_ram[high_ram_a] <= high_ram_din;
-        else
-            high_ram_dout <= (high_ram_rd) ? high_ram[high_ram_a] : 8'bx;
-    end
-
-    //DMA
-    wire dma_rd; // DMA Memory Write Enable
-    wire dma_wr; // DMA Memory Read Enable
-    wire [15:0] dma_a; // Main Address Bus
-    reg  [7:0]  dma_din; // Main Data Bus
-    wire [7:0]  dma_dout;
-    wire [7:0]  dma_mmio_dout;
-    reg dma_mmio_wr; // actually wire
-    wire dma_occupy_extbus; // 0x0000 - 0x7FFF, 0xA000 - 0xFFFF
-    wire dma_occupy_vidbus; // 0x8000 - 0x9FFF
-    wire dma_occupy_oambus; // 0xFE00 - 0xFE9F
-    dma dma(
-        .clk(clk),
-        .rst(rst),
-        .dma_rd(dma_rd),
-        .dma_wr(dma_wr),
-        .dma_a(dma_a),
-        .dma_din(dma_din),
-        .dma_dout(dma_dout),
-        .mmio_wr(dma_mmio_wr),
-        .mmio_din(cpu_dout),
-        .mmio_dout(dma_mmio_dout),
-        .dma_occupy_extbus(dma_occupy_extbus),
-        .dma_occupy_vidbus(dma_occupy_vidbus),
-        .dma_occupy_oambus(dma_occupy_oambus)
-    );
-
-    // Interrupt
-    // int_req is the request signal from peripherals.
-    // When an interrupt is generated, the peripheral should send a pulse on
-    // the int_req for exactly one clock (using 4MHz clock).
-    wire [4:0] int_req;
-
-    wire int_key_req;  
-    wire int_serial_req;
-    wire int_serial_ack;
-    wire int_tim_req;
-    wire int_tim_ack;
-    wire int_lcdc_req;
-    wire int_lcdc_ack;
-    wire int_vblank_req;
-    wire int_vblank_ack;
-
-    assign int_req[4] = int_key_req;
-    assign int_req[3] = int_serial_req;
-    assign int_req[2] = int_tim_req;
-    assign int_req[1] = int_lcdc_req;
-    assign int_req[0] = int_vblank_req;
-
-    //reg reg_ie_rd;
-    reg reg_ie_wr;
-    reg [4:0] reg_ie;
-    wire [4:0] reg_ie_din = cpu_dout[4:0];
-    wire [4:0] reg_ie_dout;
-    always @(posedge clk) begin
-        if (reg_ie_wr)
-            reg_ie <= reg_ie_din;
-    end
-
-    assign reg_ie_dout = reg_ie;
-    assign cpu_int_en = reg_ie_dout;
-
-    // Interrupt may be manually triggered
-    // int_req should only stay high for only 1 cycle for each interrupt
-    //reg reg_if_rd;
-    reg reg_if_wr;
-    reg [4:0] reg_if;
-    wire [4:0] reg_if_din = cpu_dout[4:0];
-    wire [4:0] reg_if_dout;
-    always @(posedge clk) begin
-        if (reg_if_wr)
-            reg_if <= reg_if_din | int_req;
-        else
-            reg_if <= cpu_int_flags_out | int_req;
-    end
-    assign reg_if_dout = reg_if | int_req;
-    assign cpu_int_flags_in = reg_if_dout;
-
-    assign int_serial_ack = reg_if[3];
-    assign int_tim_ack = reg_if[2];
-    assign int_lcdc_ack = reg_if[1];
-    assign int_vblank_ack = reg_if[0];
-
-    // PPU
-    wire [7:0] ppu_mmio_dout;
-    reg ppu_mmio_wr; // actually wire
-    wire [15:0] vram_a;
-    wire [7:0] vram_dout;
-    //wire [7:0] vram_din;
-    wire vram_rd;
-    wire vram_wr;
-    reg vram_cpu_wr;
-    wire [15:0] oam_a;
-    wire [7:0] oam_dout;
-    wire [7:0] oam_din;
-    wire oam_rd;
-    wire oam_wr;
-    reg oam_cpu_wr;
-
-    assign vram_a = (dma_occupy_vidbus) ? (dma_a) : (cpu_a);
-    //assign vram_din = (dma_occupy_vidbus) ? (dma_dout) : (cpu_dout);
-    assign vram_rd = (dma_occupy_vidbus) ? (dma_rd) : (cpu_rd);
-    assign vram_wr = (dma_occupy_vidbus) ? (1'b0) : (vram_cpu_wr);
-    assign oam_a = (dma_occupy_oambus) ? (dma_a) : (cpu_a);
-    assign oam_din = (dma_occupy_oambus) ? (dma_dout) : (cpu_dout);
-    assign oam_rd = (dma_occupy_oambus) ? (1'b0) : (cpu_rd);
-    assign oam_wr = (dma_occupy_oambus) ? (dma_wr) : (oam_cpu_wr);
-
-    ppu ppu(
-        .clk(clk),
-        .rst(rst),
-        .mmio_a(cpu_a), // mmio bus is always accessable to CPU
-        .mmio_dout(ppu_mmio_dout),
-        .mmio_din(cpu_dout),
-        .mmio_rd(cpu_rd),
-        .mmio_wr(ppu_mmio_wr),
-        .vram_a(vram_a),
-        .vram_dout(vram_dout),
-        .vram_din(cpu_dout), // DMA never writes to VRAM
-        .vram_rd(vram_rd),
-        .vram_wr(vram_wr),
-        .oam_a(oam_a),
-        .oam_dout(oam_dout),
-        .oam_din(oam_din),
-        .oam_rd(oam_rd),
-        .oam_wr(oam_wr),
-        .int_vblank_req(int_vblank_req),
-        .int_lcdc_req(int_lcdc_req),
-        .int_vblank_ack(int_vblank_ack),
-        .int_lcdc_ack(int_lcdc_ack),
-        .cpl(cpl), // Pixel clock
-        .pixel(pixel), // Pixel Data (2bpp)
-        .valid(valid),
-        .hs(hs), // Horizontal Sync, Low Active
-        .vs(vs),  // Vertical Sync, Low Active
-        // Ignore the debugging interface
-        /* verilator lint_off PINCONNECTEMPTY */
-        .scx(),
-        .scy(),
-        .state()
-        /* verilator lint_on PINCONNECTEMPTY */
-    );
-
-    // Timer
-    wire [7:0] timer_dout;
-    reg timer_wr; // actually wire
-
-    timer timer(
-        .clk(clk),
-        .rst(rst),
-        .ct(cpu_ct),
-        .a(cpu_a),
-        .dout(timer_dout),
-        .din(cpu_dout),
-        .rd(cpu_rd),
-        .wr(timer_wr),
-        .int_tim_req(int_tim_req),
-        .int_tim_ack(int_tim_ack)
+    wire [7:0]  high_ram_dout;
+    
+    hram u_hram(
+        .clk      (clk),
+        .rst      (rst),
+        .cpu_a    (cpu_a),
+        .cpu_dout (cpu_dout),
+        .cpu_din  (high_ram_dout),
+        .cpu_rd   (cpu_rd),
+        .cpu_wr   (cpu_wr)
     );
     
-    // Dummy Serial
-    wire [7:0] serial_dout;
-    reg serial_wr; // actually wire
-
-    serial serial(
-        .clk(clk),
-        .rst(rst),
-        .a(cpu_a),
-        .dout(serial_dout),
-        .din(cpu_dout),
-        .rd(cpu_rd),
-        .wr(serial_wr),
-        .int_serial_req(int_serial_req),
-        .int_serial_ack(int_serial_ack)
+    
+    
+    // DMA
+    wire [15:0] dma_src_a;
+    wire        dma_src_rd;
+    reg  [7:0]  dma_src_din;
+    wire [15:0] dma_dst_a;    // to oam only
+    wire [7:0]  dma_dst_dout; // to oam only
+    wire        dma_dst_wr;   // to oam only
+    wire        dma_occupy;   // to oam only
+    
+    wire dma_occupy_cart = dma_occupy & (((16'h0000 <= dma_src_a) && (dma_src_a <= 16'h7fff)) || ((16'ha000 <= dma_src_a) && (dma_src_a <= 16'hbfff)));
+    wire dma_occupy_wram = dma_occupy &  ((16'hc000 <= dma_src_a) && (dma_src_a <= 16'hfdff));
+    wire dma_occupy_vram = dma_occupy &  ((16'h8000 <= dma_src_a) && (dma_src_a <= 16'h9fff));
+    
+    wire [7:0]  reg_dma;
+    
+    dma u_dma(
+        .clk          (clk),
+        .rst          (rst),
+        .cpu_ct       (cpu_ct),
+        .cpu_a        (cpu_a),
+        .cpu_dout     (cpu_dout),
+        .cpu_rd       (cpu_rd),
+        .cpu_wr       (cpu_wr),
+        .reg_dma      (reg_dma),
+        .dma_src_a    (dma_src_a),
+        .dma_src_din  (dma_src_din),
+        .dma_src_rd   (dma_src_rd),
+        .dma_dst_a    (dma_dst_a),
+        .dma_dst_dout (dma_dst_dout),
+        .dma_dst_wr   (dma_dst_wr),
+        .dma_occupy   (dma_occupy)
     );
+    
+    
+    
+    // Work RAM
+    wire [15:0] wram_addr = dma_occupy_wram ? dma_src_a : cpu_a;
+    wire [7:0]  wram_dout;
+    wire [7:0]  reg_svbk; // gbc only
+    
+    wram u_wram(
+        .clk      (clk),
+        .rst      (rst),
+        .dmg_mode (1'b1),
+        .cpu_rd   (cpu_rd),
+        .cpu_a    (wram_addr),
+        .cpu_wr   ((!dma_occupy_wram) & (cpu_wr)),
+        .cpu_dout (cpu_dout),
+        .cpu_din  (wram_dout),
+        .reg_svbk (reg_svbk)
+    );
+    
+    
+    
+    // interrupt
+    wire intReq_joypad;
+    wire intReq_serial;
+    wire intReq_tim;
+    wire intReq_lcdc;
+    wire intReq_vblank;
+    
+    wire intAck_joypad;
+    wire intAck_serial;
+    wire intAck_tim;
+    wire intAck_lcdc;
+    wire intAck_vblank;
+    
+    wire [7:0] reg_if;
+    wire [7:0] reg_ie;
+    
+    interrupt u_intr(
+        .clk              (clk),
+        .rst              (rst),
+        .cpu_a            (cpu_a),
+        .cpu_dout         (cpu_dout),
+        .cpu_rd           (cpu_rd),
+        .cpu_wr           (cpu_wr),
+        .reg_if           (reg_if),
+        .reg_ie           (reg_ie),
+        .cpu_int_en       (cpu_int_en),
+        .cpu_int_flag     (cpu_int_flags_in),
+        .cpu_int_flag_out (cpu_int_flags_out),
+        .req_vBlank       (intReq_vblank),
+        .req_stat         (intReq_lcdc),
+        .req_timer        (intReq_tim),
+        .req_serial       (intReq_serial),
+        .req_joypad       (intReq_joypad),
+        .ack_vBlank       (intAck_vblank),
+        .ack_stat         (intAck_lcdc),
+        .ack_timer        (intAck_tim),
+        .ack_serial       (intAck_serial),
+        .ack_joypad       (intAck_joypad)
+    );
+    
+    
+    
+    // Keypad
+    wire [7:0] reg_joyp;
+    
+    joypad u_joypad(
+        .clk      (clk),
+        .rst      (rst),
+        .cpu_a    (cpu_a),
+        .cpu_rd   (cpu_rd),
+        .cpu_wr   (cpu_wr),
+        .cpu_dout (cpu_dout),
+        .reg_joyp (reg_joyp),
+        .intReq   (intReq_joypad),
+        .intAck   (intAck_joypad),
+        .keys     (key)
+    );
+    
+    
+    
+    // Timer
+    wire [7:0] reg_div;
+    wire [7:0] reg_tima;
+    wire [7:0] reg_tma;
+    wire [7:0] reg_tac;
+    
+    timer u_timer(
+        .clk      (clk),
+        .rst      (rst),
+        .cpu_stop (cpu_stop),
+        .cpu_ct   (cpu_ct),
+        .cpu_a    (cpu_a),
+        .cpu_dout (cpu_dout),
+        .cpu_rd   (cpu_rd),
+        .cpu_wr   (cpu_wr),
+        .reg_div  (reg_div),
+        .reg_tima (reg_tima),
+        .reg_tma  (reg_tma),
+        .reg_tac  (reg_tac),
+        .intReq   (intReq_tim),
+        .intAck   (intAck_tim)
+    );
+    
+    
+    
+    // Serial
+    wire [7:0] reg_sc;
+    wire [7:0] reg_sb;
+    
+    serial u_serial(
+        .clk       (clk),
+        .rst       (rst),
+        .dmg_mode  (1'b1),
+        .cpu_a     (cpu_a),
+        .cpu_dout  (cpu_dout),
+        .cpu_rd    (cpu_rd),
+        .cpu_wr    (cpu_wr),
+        .reg_sc    (reg_sc),
+        .reg_sb    (reg_sb),
+        .intReq    (intReq_serial),
+        .intAck    (intAck_serial),
+        .sio_sc_oe (sio_sc_oe),
+        .sio_sc    (sio_sc),
+        .sio_so    (sio_so),
+        .sio_si    (sio_si)
+    );
+    
+    
     
     // Sound
-    wire [7:0] sound_dout;
-    reg sound_wr; // wire
-    wire [15:0] left_pre;
-    wire [15:0] right_pre;
+    wire [7:0] reg_nr10;
+    wire [7:0] reg_nr11;
+    wire [7:0] reg_nr12;
+    wire [7:0] reg_nr13;
+    wire [7:0] reg_nr14;
+    wire [7:0] reg_nr21;
+    wire [7:0] reg_nr22;
+    wire [7:0] reg_nr23;
+    wire [7:0] reg_nr24;
+    wire [7:0] reg_nr30;
+    wire [7:0] reg_nr31;
+    wire [7:0] reg_nr32;
+    wire [7:0] reg_nr33;
+    wire [7:0] reg_nr34;
+    wire [7:0] reg_nr41;
+    wire [7:0] reg_nr42;
+    wire [7:0] reg_nr43;
+    wire [7:0] reg_nr44;
+    wire [7:0] reg_nr50;
+    wire [7:0] reg_nr51;
+    wire [7:0] reg_nr52;
+    wire [7:0] reg_pcm12;
+    wire [7:0] reg_pcm34;
+    wire [7:0] reg_waveRam;
     
-    sound sound(
-        .clk(clk),
-        .rst(rst),
-        .a(cpu_a),
-        .dout(sound_dout),
-        .din(cpu_dout),
-        .rd(cpu_rd),
-        .wr(sound_wr),
-        .left(left_pre),
-        .right(right_pre),
-        // Ignore the debugging signals
+    apu u_sound(
+        .clk             (clk),
+        .rst             (rst),
+        .doubleSpeedMode (1'd0),
+        .cpu_a           (cpu_a),
+        .cpu_dout        (cpu_dout),
+        .cpu_rd          (cpu_rd),
+        .cpu_wr          (cpu_wr),
+        .reg_div         (reg_div),
+        .reg_nr10        (reg_nr10),
+        .reg_nr11        (reg_nr11),
+        .reg_nr12        (reg_nr12),
+        .reg_nr13        (reg_nr13),
+        .reg_nr14        (reg_nr14),
+        .reg_nr21        (reg_nr21),
+        .reg_nr22        (reg_nr22),
+        .reg_nr23        (reg_nr23),
+        .reg_nr24        (reg_nr24),
+        .reg_nr30        (reg_nr30),
+        .reg_nr31        (reg_nr31),
+        .reg_nr32        (reg_nr32),
+        .reg_nr33        (reg_nr33),
+        .reg_nr34        (reg_nr34),
+        .reg_nr41        (reg_nr41),
+        .reg_nr42        (reg_nr42),
+        .reg_nr43        (reg_nr43),
+        .reg_nr44        (reg_nr44),
+        .reg_nr50        (reg_nr50),
+        .reg_nr51        (reg_nr51),
+        .reg_nr52        (reg_nr52),
+        .reg_pcm12       (reg_pcm12),
+        .reg_pcm34       (reg_pcm34),
+        .reg_waveRam     (reg_waveRam),
+        .cart_vin        (4'sd0),
+        .left            (left),
+        .right           (right)
+    );
+    
+
+
+    // PPU
+    wire [7:0]  reg_ppu;
+    wire [7:0]  vram_dout;
+    wire [7:0]  oam_dout;
+    
+    wire [15:0] vram_a     = (dma_occupy_vram) ? dma_src_a : cpu_a;
+    wire        range_vram = (16'h8000 <= cpu_a) && (cpu_a <= 16'h9fff);
+    wire        range_oam  = (16'hfe00 <= cpu_a) && (cpu_a <= 16'hfe9f);
+    
+    wire        oam_wr  = (dma_occupy) ? (dma_dst_wr)   : (range_oam & cpu_wr);
+    wire [15:0] oam_a   = (dma_occupy) ? (dma_dst_a)    : (cpu_a);
+    wire [7:0]  oam_din = (dma_occupy) ? (dma_dst_dout) : (cpu_dout);
+    
+    ppu u_ppu(
+        .clk            (clk),
+        .rst            (rst),
+        /* mmio bus is always accessable to CPU */
+        .mmio_a         (cpu_a),
+        .mmio_dout      (reg_ppu),
+        .mmio_din       (cpu_dout),
+        .mmio_rd        (cpu_rd),
+        .mmio_wr        (cpu_wr),
+        ///////////////////////////////////////////////////////////
+        .vram_a         (vram_a),
+        .vram_dout      (vram_dout),
+        .vram_din       (cpu_dout),
+        .vram_rd        (vram_rd),
+        .vram_wr        (((!dma_occupy_vram) & range_vram & cpu_wr)),
+        ///////////////////////////////////////////////////////////
+        .oam_a          (oam_a),
+        .oam_dout       (oam_dout),
+        .oam_din        (oam_din),
+        .oam_rd         (oam_rd),
+        .oam_wr         (oam_wr),
+        ///////////////////////////////////////////////////////////
+        .int_vblank_req (intReq_vblank),
+        .int_lcdc_req   (intReq_lcdc),
+        .int_vblank_ack (intAck_vblank),
+        .int_lcdc_ack   (intAck_lcdc),
+        .cpl            (cpl),
+        .pixel          (pixel),
+        .valid          (valid),
+        .hs             (hs),
+        .vs             (vs),
+        // Ignore the debugging interface
         /* verilator lint_off PINCONNECTEMPTY */
-        .ch1_level(),
-        .ch2_level(),
-        .ch3_level(),
-        .ch4_level()
+        .scx            (),
+        .scy            (),
+        .state          ()
         /* verilator lint_on PINCONNECTEMPTY */
     );
     
-    always @(posedge clk) begin
-        left <= left_pre;
-        right <= right_pre;
-    end
-
-    // Boot ROM Enable Register
-    reg brom_disable;
-    reg brom_disable_wr; // actually wire
-    always @(posedge clk) begin
-        if (rst)
-            brom_disable <= 1'b0;
-        else
-            if (brom_disable_wr && (!brom_disable))
-                brom_disable <= cpu_dout[0];
-    end
-
+    
+    
+    // Boot ROM
+    wire       brom_overwrite;
     wire [7:0] brom_dout;
-    brom brom(
-        .a(cpu_a[7:0]),
-        .d(brom_dout)
+    
+    brom u_brom(
+        .clk            (clk),
+        .rst            (rst),
+        .cpu_a          (cpu_a),
+        .cpu_wr         (cpu_wr),
+        .cpu_din        (brom_dout),
+        .brom_overwrite (brom_overwrite)
     );
-
-    // Work RAM
-    wire [7:0] wram_dout;
-    wire [12:0] wram_a;
-    wire wram_wr;
-    reg wram_cpu_wr; // actually wire
-
-    assign wram_a = (dma_occupy_extbus) ? (dma_a[12:0]) : (cpu_a[12:0]);
-    assign wram_wr = (dma_occupy_extbus) ? (1'b0) : (wram_cpu_wr);
-
-    singleport_ram #(
-        .WORDS(8192)
-    ) br_wram (
-        .clka(clk),
-        .wea(wram_wr),
-        .addra(wram_a), 
-        .dina(cpu_dout), // DMA never writes to Work RAM
-        .douta(wram_dout)
-    );
-
-    // Keypad
-    wire [7:0] keypad_reg;
-    reg keypad_reg_wr; // actually wire
-    reg [1:0] keypad_high;
-    always @(posedge clk) begin
-        if (rst)
-            keypad_high <= 2'b11;
-        else
-            if (keypad_reg_wr)
-                keypad_high <= cpu_dout[5:4];
-    end
-    assign keypad_reg[7:6] = 2'b11;
-    assign keypad_reg[5:4] = keypad_high[1:0];
-    assign keypad_reg[3:0] = 
-        ~(((keypad_high[1] == 1'b1) ? (key[7:4]) : 4'h0) | 
-          ((keypad_high[0] == 1'b1) ? (key[3:0]) : 4'h0)); 
-    assign int_key_req = (keypad_reg[3:0] != 4'hf) ? (1'b1) : (1'b0);
-
+    
+    
     // External Bus
-    reg ext_cpu_wr;  // wire
-    assign a = (dma_occupy_extbus) ? (dma_a) : (cpu_a);
-    assign dout = cpu_dout; // DMA never writes to external bus
-    assign wr = (dma_occupy_extbus) ? (1'b0) : (ext_cpu_wr);
-    assign rd = (dma_occupy_extbus) ? (dma_rd) : (cpu_rd);
-
-    // Bus Multiplexing, CPU
+    wire [15:0] ext_addr = (dma_occupy_cart) ? dma_src_a : cpu_a;
+    
+    cartridge u_cart(
+        .clk        (clk),
+        .rst        (rst),
+        .cpu_a      (ext_addr), // gbc应该应该独立
+        .cpu_dout   (cpu_dout),
+        .cpu_ct     (cpu_ct),
+        .bus_op     (bus_op),
+        .dma_occupy (dma_occupy_cart),
+        .cart_a     (cart_a),
+        .cart_d     (cart_d),
+        .cart_d_oe  (cart_d_oe),
+        .cart_nCS   (cart_nCS),
+        .cart_nWR   (cart_nWR),
+        .cart_nRD   (cart_nRD)
+    );
+    
+    
+    
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    
+    // Bus Multiplexing, DMA
     always @(*) begin
-        reg_ie_wr = 1'b0;
-        reg_if_wr = 1'b0;
-        keypad_reg_wr = 1'b0;
-        timer_wr = 1'b0;
-        serial_wr = 1'b0;
-        dma_mmio_wr = 1'b0;
-        brom_disable_wr = 1'b0;
-        high_ram_wr = 1'b0;
-        sound_wr = 1'b0;
-        ppu_mmio_wr = 1'b0;
-        vram_cpu_wr = 1'b0;
-        oam_cpu_wr = 1'b0;
-        wram_cpu_wr = 1'b0;
-        ext_cpu_wr = 1'b0;
-        // -- These are exclusive to CPU --
-        if (cpu_a == 16'hffff) begin  // 0xFFFF - IE
-            //reg_ie_rd = bus_rd;
-            reg_ie_wr = cpu_wr;
-            cpu_din = {3'b0, reg_ie_dout};
+        // vram
+        if ((16'h8000 <= dma_src_a) && (dma_src_a <= 16'h9fff)) begin
+            dma_src_din = vram_dout;
         end
-        else if (cpu_a == 16'hff0f) begin // 0xFF0F - IF
-            //reg_if_rd = bus_rd;
-            reg_if_wr = cpu_wr;
-            cpu_din = {3'b111, reg_if_dout};
-        end
-        else if (cpu_a == 16'hff00) begin // 0xFF00 - Keypad
-            keypad_reg_wr = cpu_wr;
-            cpu_din = keypad_reg;
-        end
-        else if ((cpu_a == 16'hff04) || (cpu_a == 16'hff05) ||  // Timer
-                (cpu_a == 16'hff06) || (cpu_a == 16'hff07)) begin
-            timer_wr = cpu_wr;
-            cpu_din = timer_dout;
-        end
-        else if ((cpu_a == 16'hff01) || (cpu_a == 16'hff02)) begin // Serial
-            serial_wr = cpu_wr;
-            cpu_din = serial_dout;
-        end
-        else if (cpu_a == 16'hff46) begin // 0xFF46 - DMA
-            dma_mmio_wr = cpu_wr;
-            cpu_din = dma_mmio_dout;
-        end
-        else if (cpu_a == 16'hff50) begin // 0xFF50 - BROM DISABLE
-            brom_disable_wr = cpu_wr;
-            cpu_din = {7'b0, brom_disable};
-        end
-        else if (cpu_a >= 16'hff80) begin // 0xFF80 - High RAM
-            high_ram_wr = cpu_wr;
-            cpu_din = high_ram_dout;
-        end
-        else if ((cpu_a >= 16'hff10 && cpu_a <= 16'hff1e) ||
-            (cpu_a >= 16'hff20 && cpu_a <= 16'hff26) ||
-            (cpu_a >= 16'hff30 && cpu_a <= 16'hff3f)) begin // Sound
-            sound_wr = cpu_wr;
-            cpu_din = sound_dout;
-        end
-        else if (cpu_a >= 16'hff40 && cpu_a <= 16'hff4b) begin // PPU MMIO
-            ppu_mmio_wr = cpu_wr;
-            cpu_din = ppu_mmio_dout;
-        end
-        else if ((cpu_a <= 16'h00ff) && (!brom_disable)) begin // Boot ROM
-            cpu_din = brom_dout;
-        end 
-        // -- These are shared between CPU and DMA --
-        else if (cpu_a >= 16'h8000 && cpu_a <= 16'h9fff) begin // VRAM
-            vram_cpu_wr = cpu_wr;
-            cpu_din = (dma_occupy_vidbus) ? (8'hff) : (vram_dout);
-        end
-        else if (cpu_a >= 16'hfe00 && cpu_a <= 16'hfe9f) begin // OAM
-            oam_cpu_wr = cpu_wr;
-            cpu_din = (dma_occupy_oambus) ? (8'hff) : (oam_dout);
-        end
-        else if ((cpu_a >= 16'hc000 && cpu_a <= 16'hdfff) ||
-                 (cpu_a >= 16'he000 && cpu_a <= 16'hfdff)) begin // WRAM
-            wram_cpu_wr = cpu_wr;
-            cpu_din = (dma_occupy_extbus) ? (8'hff) : (wram_dout);
-        end
-        else if ((cpu_a <= 16'h7fff) ||
-                 (cpu_a >= 16'ha000 && cpu_a <= 16'hbfff)) begin // External
-            ext_cpu_wr = cpu_wr;
-            cpu_din = (dma_occupy_extbus) ? (8'hff) : (din);
+        // WRAM
+        else if ((16'hc000 <= dma_src_a) && (dma_src_a <= 16'hfdff)) begin
+            dma_src_din = wram_dout;
         end
         else begin
-            // Unmapped area
+            dma_src_din = cart_d;
+        end
+    end
+    
+    
+    // Bus Multiplexing, CPU
+    always @(*) begin
+        //
+        // ---------- 以下由 CPU 与 DMA 共享 ----------
+        //
+        // cart rom
+        if ((16'h0000 <= cpu_a) && (cpu_a <= 16'h7fff)) begin
+            cpu_din = (dma_occupy_cart) ? 8'hff : (brom_overwrite) ? brom_dout : cart_d;
+        end
+        // vram
+        else if ((16'h8000 <= cpu_a) && (cpu_a <= 16'h9fff)) begin
+            cpu_din = (dma_occupy_vram) ? 8'hff : vram_dout;
+        end
+        // cart ram
+        else if ((16'ha000 <= cpu_a) && (cpu_a <= 16'hbfff)) begin
+            cpu_din = (dma_occupy_cart) ? 8'hff : cart_d;
+        end
+        // WRAM
+        else if ((16'hc000 <= cpu_a) && (cpu_a <= 16'hfdff)) begin
+            cpu_din = (dma_occupy_wram) ? 8'hff : wram_dout;
+        end
+        // OAM
+        else if ((16'hfe00 <= cpu_a) && (cpu_a <= 16'hfe9f)) begin
+            cpu_din = (dma_occupy) ? 8'hff : oam_dout;
+        end
+        //
+        // ---------- 以下仅由 CPU 专用 ----------
+        //
+        // $FF00    P1/JOYP
+        else if (cpu_a == 16'hff00) begin
+            cpu_din = reg_joyp;
+        end
+        // $FF01    SB
+        else if (cpu_a == 16'hff01) begin
+            cpu_din = reg_sb;
+        end
+        // $FF02    SC
+        else if (cpu_a == 16'hff02) begin
+            cpu_din = reg_sc;
+        end
+        // $FF04    DIV
+        else if (cpu_a == 16'hff04) begin
+            cpu_din = reg_div;
+        end
+        // $FF05    TIMA
+        else if (cpu_a == 16'hff05) begin
+            cpu_din = reg_tima;
+        end
+        // $FF06    TMA
+        else if (cpu_a == 16'hff06) begin
+            cpu_din = reg_tma;
+        end
+        // $FF07    TAC
+        else if (cpu_a == 16'hff07) begin
+            cpu_din = reg_tac;
+        end
+        // $FF0F    IF
+        else if (cpu_a == 16'hff0f) begin
+            cpu_din = reg_if;
+        end
+        /****************** Sound ******************/
+        // $FF10: NR10    |    $FF11: NR11    |    $FF12: NR12    |    $FF13: NR13    |    $FF14: NR14
+        else if (cpu_a == 16'hff10) begin
+            cpu_din = reg_nr10;
+        end
+        else if (cpu_a == 16'hff11) begin
+            cpu_din = reg_nr11;
+        end
+        else if (cpu_a == 16'hff12) begin
+            cpu_din = reg_nr12;
+        end
+        else if (cpu_a == 16'hff13) begin
+            cpu_din = reg_nr13;
+        end
+        else if (cpu_a == 16'hff14) begin
+            cpu_din = reg_nr14;
+        end
+        // $FF15: [N/A]   |    $FF16: NR21    |    $FF17: NR22    |    $FF18: NR23    |    $FF19: NR24
+        else if (cpu_a == 16'hff16) begin
+            cpu_din = reg_nr21;
+        end
+        else if (cpu_a == 16'hff17) begin
+            cpu_din = reg_nr22;
+        end
+        else if (cpu_a == 16'hff18) begin
+            cpu_din = reg_nr23;
+        end
+        else if (cpu_a == 16'hff19) begin
+            cpu_din = reg_nr24;
+        end
+        // $FF1A: NR30    |    $FF1B: NR31    |    $FF1C: NR32    |    $FF1D: NR33    |    $FF1E: NR34
+        else if (cpu_a == 16'hff1a) begin
+            cpu_din = reg_nr30;
+        end
+        else if (cpu_a == 16'hff1b) begin
+            cpu_din = reg_nr31;
+        end
+        else if (cpu_a == 16'hff1c) begin
+            cpu_din = reg_nr32;
+        end
+        else if (cpu_a == 16'hff1d) begin
+            cpu_din = reg_nr33;
+        end
+        else if (cpu_a == 16'hff1e) begin
+            cpu_din = reg_nr34;
+        end
+        // $FF1F: [N/A]   |    $FF20: NR41    |    $FF21: NR42    |    $FF22: NR43    |    $FF23: NR44
+        else if (cpu_a == 16'hff20) begin
+            cpu_din = reg_nr41;
+        end
+        else if (cpu_a == 16'hff21) begin
+            cpu_din = reg_nr42;
+        end
+        else if (cpu_a == 16'hff22) begin
+            cpu_din = reg_nr43;
+        end
+        else if (cpu_a == 16'hff23) begin
+            cpu_din = reg_nr44;
+        end
+        // $FF24: NR50    |    $FF25: NR51    |    $FF26: NR52
+        else if (cpu_a == 16'hff24) begin
+            cpu_din = reg_nr50;
+        end
+        else if (cpu_a == 16'hff25) begin
+            cpu_din = reg_nr51;
+        end
+        else if (cpu_a == 16'hff26) begin
+            cpu_din = reg_nr52;
+        end
+        // $FF30-FF3F: Wave RAM
+        else if ((16'hff30 <= cpu_a) && (cpu_a <= 16'hff3f)) begin
+            cpu_din = reg_waveRam;
+        end
+        // $FF46    DMA
+        else if (cpu_a == 16'hff46) begin
+            cpu_din = reg_dma;
+        end
+        /****************** PPU ******************/
+        // $FF40    LCDC    |    $FF41    STAT    |    $FF42    SCY    |    $FF43    SCX
+        // $FF44    LY      |    $FF45    LYC     |    $ff46-$ff49    [N/A]
+        // $FF4A    WY      |    $FF4B    WX
+        else if (cpu_a >= 16'hff40 && cpu_a <= 16'hff4b) begin
+            cpu_din = reg_ppu;
+        end
+        // $FF50    Boot ROM mapping control
+        else if (cpu_a == 16'hff50) begin
+            cpu_din = 8'hff;
+        end
+        // $FF70    SVBK/WBK    CGB
+        else if (cpu_a == 16'hff07) begin
+            cpu_din = reg_svbk;
+        end
+        // 0xFF80~0xfffe   High RAM
+        else if ((16'hff80 <= cpu_a) && (cpu_a <= 16'hfffe)) begin
+            cpu_din = high_ram_dout;
+        end
+        // $FFFF    IE
+        else if (cpu_a == 16'hffff) begin
+            cpu_din = reg_ie;
+        end
+        else begin
             cpu_din = 8'hff;
         end
     end
-
-    // Bus Multiplexing, DMA
-    always @(*) begin
-        if (dma_a >= 16'h8000 && dma_a <= 16'h9fff) begin // VRAM
-            dma_din = vram_dout;
-        end
-        else if ((dma_a >= 16'hc000 && dma_a <= 16'hdfff) ||
-                 (dma_a >= 16'he000 && dma_a <= 16'hfdff)) begin // WRAM
-            dma_din = wram_dout;
-        end
-        else begin
-            dma_din = din;
-        end
-    end
-
+    
+    
 endmodule

@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
 `default_nettype wire
+`include "common.v"
+
 ////////////////////////////////////////////////////////////////////////////////
 // Company: 
 // Engineer: Wenting Zhang
@@ -20,6 +22,7 @@ module cpu(
     input rst,
     output reg phi,
     output wire [1:0] ct,
+    output [1:0] bus_op,
     output reg [15:0] a,
     output reg [7:0] dout,
     input [7:0] din,
@@ -28,9 +31,9 @@ module cpu(
     input [4:0] int_en,
     input [4:0] int_flags_in,
     output wire [4:0] int_flags_out,
-    input [7:0] key_in,
     output reg done,
-    output wire fault
+    output stop,
+    output fault
     );
 
     reg  [7:0]  opcode;
@@ -48,7 +51,7 @@ module cpu(
     wire [2:0]  rf_wr_sel;
     wire [2:0]  rf_rd_sel;
     wire [1:0]  rf_rdw_sel;
-    wire [1:0]  bus_op;
+    // wire [1:0]  bus_op; 
     wire [1:0]  db_src;
     wire [1:0]  ab_src;
     wire [1:0]  ct_op;
@@ -56,7 +59,7 @@ module cpu(
     wire [1:0]  flags_pattern;
     wire        high_mask;
     wire        next;
-    wire        stop;
+    // wire        stop;
     wire        halt;
     reg         wake;
     //wire        fault;
@@ -130,7 +133,7 @@ module cpu(
     wire       pc_b_sel_ex;
     wire       pc_jr;
     wire       pc_we_ex;
-    wire       pc_revert;
+    wire       pc_revert; // pc回退
     wire       temp_redir; // redirect regfile operation to temp register
     wire       opcode_redir;
 
@@ -168,6 +171,8 @@ module cpu(
         .flags_we(flags_we_ex),
         .flags_pattern(flags_pattern),
         .high_mask(high_mask),
+        .int_en(int_en),
+        .int_flags_in(int_flags_in),
         .int_master_en(int_master_en),
         .int_dispatch(int_dispatch),
         .int_ack(int_ack),
@@ -180,17 +185,22 @@ module cpu(
     
     always @(posedge clk) begin
         done <= stop | halt | fault; 
+        // done <= fault; 
         // only used to stop simulation if needed
         // and delay 1 clk
     end
 
+    // wire wake_comb = 
+    //     // Any enabled interrupt can wake up halted CPU, IME doesn't matter
+    //     (halt) ? ((int_flags_in & int_en) != 0) : (
+    //     // Any enabled interrupt and any keypress can wake up stopped CPU
+    //     // IME doesn't matter. Though the typical usage is clear the IE before
+    //     // entering STOP mode, so only keypad can wake up the CPU.
+    //     (stop) ? (((int_flags_in & int_en) != 0) || (key_in != 0)) : 
+    //     (1'b0));
     wire wake_comb = 
-        // Any enabled interrupt can wake up halted CPU, IME doesn't matter
         (halt) ? ((int_flags_in & int_en) != 0) : (
-        // Any enabled interrupt and any keypress can wake up stopped CPU
-        // IME doesn't matter. Though the typical usage is clear the IE before
-        // entering STOP mode, so only keypad can wake up the CPU.
-        (stop) ? (((int_flags_in & int_en) != 0) || (key_in != 0)) : 
+        (stop) ? (int_flags_in[4]) : // joypad intr
         (1'b0));
     reg wake_delay; // Wake should be delayed for 1 Mcycle
     always @(posedge clk) begin
@@ -239,8 +249,7 @@ module cpu(
             int_flags_in
         )))));
 
-    assign int_flags_out = 
-        ((int_dispatch)&&(pc_we)) ? (int_flags_out_cleared) : (int_flags_in);
+    assign int_flags_out = ((int_dispatch)&&(pc_we)) ? (int_flags_out_cleared) : (int_flags_in);
 
     // Regisiter file
     wire [7:0] rf_rd_raw;
@@ -274,7 +283,7 @@ module cpu(
 
     // Register A
     reg [15:0] imm_reg;
-    singlereg #(8) acc(
+    single_reg #(8) acc(
         .clk(clk),
         .rst(rst),
         .wr(acc_wr),
@@ -295,6 +304,7 @@ module cpu(
         (pc_src == 2'b01) ? ({10'b00, opcode[5:3], 3'b000}) : (
         (pc_src == 2'b10) ? (temp_rd) : (
         (pc_src == 2'b11) ? (16'b0) : (16'b0)))));
+    // 中断处理函数指针
     wire [15:0] pc_int = 
         (int_flags_masked[0]) ? (16'h0040) : (
         (int_flags_masked[1]) ? (16'h0048) : (
@@ -306,8 +316,8 @@ module cpu(
             // this behavior is tested by acceptence/interrupts/ie_push
             16'h0000
         )))));
-    assign pc_we_l = ((alu_dst == 2'b01) && (pc_b_sel == 1'b0)) ? (1'b1) : (1'b0);
-    assign pc_we_h = ((alu_dst == 2'b01) && (pc_b_sel == 1'b1)) ? (1'b1) : (1'b0);
+    assign pc_we_l = ((alu_dst == `ALU_DST_PC) && (pc_b_sel == 1'b0)) ? (1'b1) : (1'b0);
+    assign pc_we_h = ((alu_dst == `ALU_DST_PC) && (pc_b_sel == 1'b1)) ? (1'b1) : (1'b0);
     always @(posedge clk) begin
         if (rst)
             pc <= 16'b0;
@@ -334,7 +344,7 @@ module cpu(
     end
 
     // Register F
-    /*singlereg #(4) flags(
+    /*single_reg #(4) flags(
         .clk(clk),
         .rst(rst),
         .wr(flags_wr),
@@ -424,6 +434,18 @@ module cpu(
     assign imm_abs = (imm_reg[7]) ? (~imm_reg[7:0] + 1'b1) : (imm_reg[7:0]);
 
     // CT - FSM / Bus Operation 
+    // bus_op 值    宏定义      含义
+    // 2'b00    BUS_OP_IDLE     空闲周期，无总线活动
+    // 2'b01    BUS_OP_IF       指令取指（Instruction Fetch）
+    // 2'b10    BUS_OP_WRITE    写周期
+    // 2'b11    BUS_OP_READ     读周期（立即数或数据）
+
+    // alu_dst 值    宏定义    目的地
+    // 2'b00    ALU_DST_ACC    A 寄存器（累加器）
+    // 2'b01    ALU_DST_PC     PC 字节
+    // 2'b10    ALU_DST_REG    寄存器
+    // 2'b11    ALU_DST_DB     数据总线缓冲区
+
     always @(posedge clk) begin
         if (rst) begin
             a <= 16'b0;
@@ -438,65 +460,80 @@ module cpu(
             alu_result_buffer <= 8'b0;
         end
         else begin
-            if ((alu_dst == 2'b10) && temp_redir && !(ct_state == 2'b10 && bus_op == 2'b11))
-                if (rf_wr_sel[0]) imm_reg[7:0] <= rf_wr;
-                else imm_reg[15:8] <= rf_wr;
+
+            if ((alu_dst == `ALU_DST_REG) && temp_redir && !(ct_state == 2'b10 && bus_op == `BUS_OP_READ)) begin
+                if (rf_wr_sel[0])
+                    imm_reg[7:0] <= rf_wr;
+                else
+                    imm_reg[15:8] <= rf_wr; // 暂存从总线读取的立即数或 16 位运算的中间值
+            end
 
             case (ct_state)
-            2'b00: begin
-                // Setup Address
-                a <= ab_wr;
-                rd <= ((bus_op == 2'b01)||(bus_op == 2'b11)) ? (1'b1) : (1'b0);
-                wr <= 0;
-                phi <= 1;
-                // Backup ALU results
-                alu_result_buffer <= alu_result;
-            end
-            2'b01: begin
-                // Read in progress
-            end
-            2'b10: begin
-                if (bus_op == 2'b10) begin
-                    // Write cycle
-                    wr <= 1;
+                2'b00: begin
+                    // 地址建立 / 译码执行
+                    a   <= ab_wr;
+                    rd  <= ((bus_op == `BUS_OP_IF)||(bus_op == `BUS_OP_READ)) ? (1'b1) : (1'b0);
+                    wr  <= 0;
+                    phi <= 1;
+                    // Backup ALU results
+                    alu_result_buffer <= alu_result;
+                end
+                2'b01: begin
+                    // 读等待
                     dout <= db_wr;
                 end
-                else if (bus_op == 2'b01) begin
-                    // Instruction Fetch Cycle
-                    wr <= 0;
-                    opcode <= din;
-                end
-                else if (bus_op == 2'b11) begin
-                    // Data Read cycle
-                    wr <= 0;
-                    db_rd_buffer <= din;
-                    if ((opcode == 8'hCB) && (m_cycle == 0)) cb <= din[7:0];
-                    // mcycle is slower
-                    if (m_cycle == 3'd0) imm_reg[7:0] <= din;
-                    else if (m_cycle == 3'd1) imm_reg[15:8] <= din; 
-                end
-                else begin
-                    wr <= 0;
-                end
-                rd <= 0;
-                phi <= 0;
+                2'b10: begin
 
-                // Interrupt dispatch happens here
-                // Guarenteed if it is at instruction fetch cycle,
-                // It is at instruction boundaries,
-                // and m_cycle will start from 0.
-                if ((!int_dispatch) && (int_flags_masked != 0) && (int_master_en) && ((bus_op == 2'b01) || (halt == 1'b1)))
-                    int_dispatch <= 1'b1;
-                else if ((int_dispatch) && (int_ack)) begin
-                    int_dispatch <= 1'b0;
+                    case (bus_op)
+                        `BUS_OP_WRITE:  begin
+                            // Write cycle
+                            wr <= 1;
+                            dout <= db_wr;
+                        end
+                        `BUS_OP_IF: begin
+                            // Instruction Fetch Cycle
+                            wr <= 0;
+                            opcode <= din;
+                        end
+                        `BUS_OP_READ: begin
+                            // Data Read cycle
+                            wr <= 0;
+                            db_rd_buffer <= din;
+                            if ((opcode == 8'hCB) && (m_cycle == 0))
+                                cb <= din[7:0];
+                            // mcycle is slower
+                            if (m_cycle == 3'd0)
+                                imm_reg[7:0] <= din;
+                            else if (m_cycle == 3'd1)
+                                imm_reg[15:8] <= din; 
+                        end
+                        `BUS_OP_IDLE: begin
+                            wr <= 0;
+                        end
+                    endcase
+
+                    rd <= 0;
+
+                    if(!halt)
+                        phi <= 0;
+
+                    // Interrupt dispatch happens here
+                    // Guarenteed if it is at instruction fetch cycle,
+                    // It is at instruction boundaries,
+                    // and m_cycle will start from 0. 中断分发只能发生在指令边界?
+                    //     待处理中断             if&ie                    ime
+                    if ((!int_dispatch) && (int_flags_masked != 0) && (int_master_en) && ((bus_op == `BUS_OP_IF) || (halt == 1'b1)))
+                        int_dispatch <= 1'b1;
+                    else if ((int_dispatch) && (int_ack)) begin
+                        int_dispatch <= 1'b0;
+                    end
                 end
-            end
-            2'b11: begin
-                // Bus Idle
-                rd <= 0;
-                wr <= 0;
-                dout <= 8'b0;
-            end
+                2'b11: begin
+                    // Bus Idle
+                    rd <= 0;
+                    wr <= 0;
+                    // dout <= 8'b0;
+                end
             endcase
         end
     end

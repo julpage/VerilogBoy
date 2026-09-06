@@ -14,7 +14,7 @@
 //  Single 8-bit register
 //////////////////////////////////////////////////////////////////////////////////
 
-module singlereg(clk, rst, wr, rd, we);
+module single_reg(clk, rst, wr, rd, we);
     parameter WIDTH = 8;
 
     input clk;

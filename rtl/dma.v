@@ -1,164 +1,135 @@
 `timescale 1ns / 1ps
-/**
- * Block transfer unit for the GB80 CPU.
- * 
- * Original Author: Joseph Carlos (jdcarlos1@gmail.com)
- * Modified: Wenting Zhang (zephray@outlook.com)
- */
 
-/**
- * The DMA unit.
- * 
- * Contains the DMA register and performs DMA transfers when the register is
- * written to. Each transfer takes 320 cycles rather than the canon 640, this
- * is because there's no reason to take 640.
- * 
- * @inout addr_ext The address bus.
- * @inout data_ext The data bus.
- * @output dma_transfer 1 if a transfer is occurring, 0 otherwise.
- * @input mem_re 1 if the processor is reading from memory.
- * @input mem_we 1 if the processor is writing to memory.
- * @input clock The CPU clock.
- * @input reset The CPU reset.
- */
 module dma(
-    input  wire        clk,
-    //input  wire        phi,
-    input  wire        rst,
-    output reg         dma_rd,
-    output reg         dma_wr,
-    //output wire        dma_rd_comb,
-    //output wire        dma_wr_comb,
-    output reg  [15:0] dma_a,
-    input  wire [7:0]  dma_din,
-    output reg  [7:0]  dma_dout,
-    input  wire        mmio_wr,
-    input  wire [7:0]  mmio_din,
-    output wire [7:0]  mmio_dout,
-    output wire        dma_occupy_extbus,
-    output wire        dma_occupy_vidbus,
-    output wire        dma_occupy_oambus
-    );
-
-    // DMA data blocks /////////////////////////////////////////////////////////
-
-    reg [7:0]    dma_start_addr;
-    reg [7:0]    count;
-
-    assign mmio_dout = dma_start_addr;
-
-    reg cpu_mem_disable;
-
-    assign dma_occupy_extbus = cpu_mem_disable & 
-            ((dma_start_addr <= 8'h7f) || (dma_start_addr >= 8'ha0));
-    assign dma_occupy_vidbus = cpu_mem_disable &
-            ((dma_start_addr >= 8'h80) && (dma_start_addr <= 8'h9f));
-    assign dma_occupy_oambus = cpu_mem_disable;
-
-   // DMA transfer logic //////////////////////////////////////////////////////
-   
-    localparam DMA_IDLE = 'd0;
-    localparam DMA_TRANSFER_READ_ADDR  = 'd1;
-    localparam DMA_TRANSFER_READ_DATA  = 'd2;
-    localparam DMA_TRANSFER_WRITE_DATA = 'd3;
-    localparam DMA_TRANSFER_WRITE_WAIT = 'd4;
-    localparam DMA_DELAY = 'd5;
+    input clk,
+    input rst,
+    // cpu对dma的控制
+    input [1:0] cpu_ct,
+    input [15:0] cpu_a,
+    input [7:0] cpu_dout,
+    input cpu_rd,
+    input cpu_wr,
+    output [7:0] reg_dma,
+    // 对总线的控制
+    output reg [15:0] dma_src_a,
+    input [7:0] dma_src_din,
+    output reg dma_src_rd,
+    output reg [15:0] dma_dst_a,
+    output reg [7:0] dma_dst_dout,
+    output reg dma_dst_wr,
+    output reg dma_occupy
+);
     
-    reg [2:0] state;
-
-    always @(posedge clk) begin
+    
+    // ## $FF46    DMA    OAM DMA source address & start    R/W    All
+    //
+    // - OAM DMA的源地址，只要写入就开始传输，搬到OAM(fe00~fe9f)
+    // - 写入的值乘以 $100 就是源地址，比如写入XX($00~$df)，则将会搬运 $xx00~$xx9f 共160个字节
+    // - 耗时160个MCycle
+    // - 搬运时暴力抢夺总线，直到搬完，但CPU不停止运行，PPU和CPU都不能访问OAM
+    // - DMG 卡带、WRAM、VRAM共用总线，CPU只能访问HRAM
+    // - CGB 卡带总线和内部总线独立，在 WRAM->OAM 时，CPU可以访问卡带rom和ram; 在 cart->oam 时，CPU可以访问wram;
+    reg [7:0] baseAddr_src;
+    reg       flag_wrReg;
+    
+    always @(posedge rst or posedge clk) begin
         if (rst) begin
-            dma_start_addr <= 8'h00;
+            flag_wrReg   <= 1'd0;
+            baseAddr_src <= 8'd0;
         end
         else begin
-            if (mmio_wr) begin
-                // Writing is always valid regardless of the state
-                dma_start_addr <= mmio_din;
+
+            if ((cpu_wr) && (cpu_a == 16'hff46)) begin
+                flag_wrReg <= 1'd1;
+                baseAddr_src <= (cpu_dout >= 8'he0) ? (cpu_dout & 8'hdf) : cpu_dout;
+            end
+            else begin
+                if (flag_wrReg) begin
+                    flag_wrReg <= 1'd0;
+                end
+            end
+            
+        end
+    end
+    
+    
+    
+    reg [7:0] trans_count = 8'd0;
+    reg [1:0] dma_state   = 2'd0;
+    
+    always @(posedge rst or posedge clk) begin
+        if (rst) begin
+            dma_state    <= 2'd0;
+            trans_count  <= 8'd0;
+            dma_src_a    <= 16'd0;
+            dma_src_rd   <= 1'd0;
+            dma_dst_a    <= 16'd0;
+            dma_dst_dout <= 8'd0;
+            dma_dst_wr   <= 1'd0;
+            dma_occupy   <= 1'd0;
+        end
+        else begin
+            
+            if (flag_wrReg) begin
+                dma_state <= 2'd1;
+            end
+            else begin
+                case (dma_state)
+                    // 空闲
+                    2'd0: begin
+                        dma_occupy <= 1'd0;
+                        dma_src_rd <= 1'd0;
+                        dma_dst_wr <= 1'd0;
+                    end
+                    // 对齐 m-cycle
+                    2'd1: begin
+                        trans_count <= 8'd0;
+                        dma_src_rd  <= 1'd0;
+                        dma_dst_wr  <= 1'd0;
+                        if (cpu_ct == 2'd3) begin
+                            dma_state <= 2'd2;
+                        end
+                    end
+                    // 开始搬数据
+                    2'd2:begin
+                        case (cpu_ct)
+                            2'd0: begin
+                                dma_dst_wr  <= 1'd0;
+                                trans_count <= trans_count +8'd1;
+                                if (trans_count < 8'd160) begin
+                                    dma_occupy <= 1'd1;
+                                    dma_src_a  <= {baseAddr_src, trans_count};
+                                    dma_dst_a  <= {8'hfe,        trans_count};
+                                    dma_src_rd <= 1'd1;
+                                end
+                                else begin
+                                    dma_state  <= 2'd0;
+                                    dma_occupy <= 1'd0;
+                                    dma_src_rd <= 1'd0;
+                                end
+                            end
+                            2'd1: begin
+                            end
+                            2'd2: begin
+                                dma_dst_dout <= dma_src_din;
+                                dma_src_rd   <= 1'd0;
+                                dma_dst_wr   <= 1'd1;
+                            end
+                            2'd3: begin
+                            end
+                        endcase
+                    end
+                    default: begin
+                        dma_state <= 2'd0;
+                    end
+                endcase
             end
         end
     end
+    
+    
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    assign reg_dma = baseAddr_src;
+    
+endmodule
 
-    always @(posedge clk) begin
-        if (rst) begin
-            state <= DMA_IDLE;
-            count <= 8'd0;
-            dma_wr <= 1'b0;
-            dma_rd <= 1'b0;
-            cpu_mem_disable <= 1'b0;
-        end
-        else begin
-            case (state)
-            DMA_IDLE: begin
-                dma_wr <= 1'b0;
-                dma_rd <= 1'b0;
-                cpu_mem_disable <= 1'b0;
-                if (mmio_wr) begin
-                    // Transfer starts on next cycle
-                    state <= DMA_DELAY;
-                    count <= 8'd3; // Delay before start
-                end
-                else
-                    count <= 8'd0;
-            end
-            DMA_DELAY: begin
-                if (count != 8'd0) begin
-                    count <= count - 1;
-                end
-                else begin
-                    state <= DMA_TRANSFER_READ_ADDR;
-                end
-            end
-            DMA_TRANSFER_READ_ADDR: begin
-                dma_wr <= 1'b0;
-                cpu_mem_disable <= 1'b1;
-                // Load the temp register with data from memory
-                dma_a <= {dma_start_addr, count}; // Output read address
-                dma_rd <= 1'b1;
-                if (mmio_wr) begin // Allow re-triggering
-                    state <= DMA_DELAY;
-                    count <= 8'd3; // Delay before start
-                end
-                else
-                    state <= DMA_TRANSFER_READ_DATA;
-            end
-            DMA_TRANSFER_READ_DATA: begin
-                state <= DMA_TRANSFER_WRITE_DATA;
-                // Basically wait
-            end
-            DMA_TRANSFER_WRITE_DATA: begin
-                // Read data
-                dma_dout <= dma_din;
-                dma_rd <= 1'b0;
-                // Write the temp register to memory
-                dma_a <= {8'hfe, count}; // Output write address
-                dma_wr <= 1'b1;
-                if (mmio_wr) begin // Allow re-triggering
-                    state <= DMA_DELAY;
-                    count <= 8'd3; // Delay before start
-                end
-                else
-                    state <= DMA_TRANSFER_WRITE_WAIT;
-            end
-            DMA_TRANSFER_WRITE_WAIT: begin
-                // Wait
-                if (mmio_wr) begin // Allow re-triggering
-                    state <= DMA_DELAY;
-                    count <= 8'd3; // Delay before start
-                end
-                else
-                if (count == 8'h9f) begin
-                    state <= DMA_IDLE;
-                    count <= 8'd0;
-                end
-                else begin
-                    state <= DMA_TRANSFER_READ_ADDR;
-                    count <= count + 8'd1;
-                end
-            end
-            default: begin
-            end
-            endcase
-        end
-    end
-   
-endmodule // dma
