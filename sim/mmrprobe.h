@@ -24,14 +24,21 @@
 //
 #pragma once
 
-class MMRPROBE {
+class MMRPROBE
+{
 public:
     MMRPROBE(void);
     ~MMRPROBE(void);
-    void apply(uint8_t wr_data, uint16_t address, uint8_t wr_enable, 
-        uint8_t rd_enable, uint8_t &rd_data, uint16_t pc);
+    void apply(uint8_t wr_data, uint16_t address, uint8_t wr_enable,
+               uint8_t rd_enable, uint8_t rd_data, uint16_t pc, uint64_t timeStamp);
+
 private:
+    uint16_t last_addr;
     uint8_t last_wr;
     uint8_t last_rd;
     uint8_t last_data;
+    uint8_t last_data_rd;
+    uint16_t last_rd_addr;
+    uint8_t have_last_rd;
+    uint8_t rd_dirty;   // 自上次读以来是否发生过写：为 1 时下一次读需强制重新打印
 };

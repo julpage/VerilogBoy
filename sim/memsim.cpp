@@ -29,17 +29,20 @@
 #include <assert.h>
 #include "memsim.h"
 
-MEMSIM::MEMSIM(uint16_t base, size_t len) {
+MEMSIM::MEMSIM(uint16_t base, size_t len)
+{
     this->base = base;
     this->len = len;
     mem = (uint8_t *)malloc(len);
 }
 
-MEMSIM::~MEMSIM(void) {
+MEMSIM::~MEMSIM(void)
+{
     free(mem);
 }
 
-void MEMSIM::load(char *fname) {
+void MEMSIM::load(char *fname)
+{
     FILE *fp;
 
     fp = fopen(fname, "rb");
@@ -52,27 +55,30 @@ void MEMSIM::load(char *fname) {
     fclose(fp);
 }
 
-void MEMSIM::apply(uint8_t wr_data, uint16_t address, 
-    uint8_t wr, uint8_t rd, uint8_t &rd_data) {
+void MEMSIM::apply(uint8_t wr_data, uint16_t address,
+                   uint8_t wr, uint8_t rd, uint8_t &rd_data)
+{
 
-    if ((address >= base) && (address < (base + len))) {
-        if (wr) {
+    if ((address >= base) && (address < (base + len)))
+    {
+        if (!wr)
+        {
             mem[address - base] = wr_data;
 #ifdef __DEBUG
-        printf("MEMBUS W[%04x] = %02x\n",
-            address,
-            wr_data);
+            printf("MEMBUS W[%04x] = %02x\n",
+                   address,
+                   wr_data);
 #endif
-        } 
-        else if (rd) {
+        }
+        
+        if (!rd)
+        {
             rd_data = mem[address - base];
 #ifdef __DEBUG
-        printf("MEMBUS R[%04x] = %02x\n",
-            address,
-            rd_data);
+            printf("MEMBUS R[%04x] = %02x\n",
+                   address,
+                   rd_data);
 #endif
         }
     }
 }
-
-

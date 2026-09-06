@@ -32,8 +32,8 @@
 #include "waveheader.h"
 
 AUDIOSIM::AUDIOSIM(void) {
-    pcm.clear();
     sample_counter = 0;
+    buffer.clear();
 }
 
 AUDIOSIM::~AUDIOSIM(void) {
@@ -41,25 +41,27 @@ AUDIOSIM::~AUDIOSIM(void) {
 }
 
 void AUDIOSIM::save(const char *fname) {
-    save_wav(fname, pcm);
-}
-
-void AUDIOSIM::save_wav(const char *fname, std::vector<int16_t> &pcm) {
+    // Always delete any existing WAV so a fresh file is produced
+    remove(fname);
+    if (buffer.empty())
+        return;
+    FILE *fp = fopen(fname, "wb+");
+    assert(fp);
     uint8_t header[44];
-    waveheader(header, 48000, 16, pcm.size() / 2);
-    FILE *fp;
-    fp = fopen(fname, "wb+");
+    waveheader(header, 48000, 16, buffer.size() / 2);
     fwrite(header, 44, 1, fp);
-    fwrite(&pcm[0], pcm.size() * 2, 1, fp);
+    fwrite(&buffer[0], sizeof(int16_t), buffer.size(), fp);
     fclose(fp);
     printf("Audio save to %s\n", fname);
 }
 
-void AUDIOSIM::apply(uint8_t left, uint8_t right) {
+void AUDIOSIM::apply(uint16_t left, uint16_t right) {
     sample_counter++;
     if (sample_counter == DECIMATION_M) {
         sample_counter = 0;
-        pcm.push_back(left);
-        pcm.push_back(right);
+        // Hardware output is 16-bit unsigned (0 = silence, up to 0x7FFF),
+        // which maps directly onto signed 16-bit PCM as a positive sample.
+        buffer.push_back((int16_t)left);
+        buffer.push_back((int16_t)right);
     }
 }

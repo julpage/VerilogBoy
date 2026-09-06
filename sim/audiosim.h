@@ -24,6 +24,10 @@
 //
 #pragma once
 
+#include <stdio.h>
+#include <stdint.h>
+#include <vector>
+
 // 4M->48K: 88 times decimation
 #define DECIMATION_M        88
 
@@ -32,10 +36,9 @@ public:
     AUDIOSIM(void);
     ~AUDIOSIM(void);
     void save(const char *fname);
-    void apply(uint8_t left, uint8_t right);
+    void apply(uint16_t left, uint16_t right);
     void bypass(int16_t left, int16_t right);
 private:
     int sample_counter;
-    std::vector<int16_t> pcm;
-    void save_wav(const char *fname, std::vector<int16_t> &pcm);
+    std::vector<int16_t> buffer;
 };

@@ -25,6 +25,11 @@ sim/*.txt
 sim/*.gb
 sim/*.gbc
 sim/*.sav
+sim/.vscode
+sim/obj
+
+
+rtl/bak
 
 
 

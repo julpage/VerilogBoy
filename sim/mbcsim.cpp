@@ -28,21 +28,24 @@
 #include <assert.h>
 #include "mbcsim.h"
 
-MBCSIM::MBCSIM(void) {
+MBCSIM::MBCSIM(void)
+{
     ram = new uint8_t[MBC_RAM_SIZE];
     rom = new uint8_t[MBC_ROM_SIZE];
     ram_enable = 0; // Disable by default
-    mbc_mode = 0; // Banking mode for MBC1
+    mbc_mode = 0;   // Banking mode for MBC1
     rom_bank = 1;
     ram_bank = 0;
 }
 
-MBCSIM::~MBCSIM(void) {
+MBCSIM::~MBCSIM(void)
+{
     delete[] ram;
     delete[] rom;
 }
 
-void MBCSIM::load(const char *fname) {
+void MBCSIM::load(const char *fname)
+{
     FILE *fp;
 
     fp = fopen(fname, "rb");
@@ -61,27 +64,33 @@ void MBCSIM::load(const char *fname) {
     printf("ROM Title: %s\n", title);
 
     char ctype = rom[0x147];
-    if ((ctype == 0x00) || (ctype == 0x08) || (ctype == 0x09)) {
+    if ((ctype == 0x00) || (ctype == 0x08) || (ctype == 0x09))
+    {
         mbc_type = MBCNONE;
         printf("MBC Type: None\n");
     }
-    else if ((ctype >= 0x01)&&(ctype <= 0x03)) {
+    else if ((ctype >= 0x01) && (ctype <= 0x03))
+    {
         mbc_type = MBC1;
         printf("MBC Type: MBC1\n");
     }
-    else if ((ctype >= 0x05)&&(ctype <= 0x06)) {
+    else if ((ctype >= 0x05) && (ctype <= 0x06))
+    {
         mbc_type = MBC2;
         printf("MBC Type: MBC2\n");
     }
-    else if ((ctype >= 0x0f)&&(ctype <= 0x13)) {
+    else if ((ctype >= 0x0f) && (ctype <= 0x13))
+    {
         mbc_type = MBC3;
         printf("MBC Type: MBC3\n");
     }
-    else if ((ctype >= 0x19)&&(ctype <= 0x1e)) {
+    else if ((ctype >= 0x19) && (ctype <= 0x1e))
+    {
         mbc_type = MBC5;
         printf("MBC Type: MBC5\n");
     }
-    else {
+    else
+    {
         mbc_type = MBCUNKNOWN;
         printf("Unsupported Cartridge Type: %d\n", ctype);
     }
@@ -90,11 +99,11 @@ void MBCSIM::load(const char *fname) {
     if (rom_size <= 0x08)
         rom_size = (1 << rom_size) * 32;
     else if (rom_size == 0x52)
-        rom_size = 72*16; // 72 banks
+        rom_size = 72 * 16; // 72 banks
     else if (rom_size == 0x53)
-        rom_size = 80*16;
+        rom_size = 80 * 16;
     else if (rom_size == 0x54)
-        rom_size = 96*16;
+        rom_size = 96 * 16;
     else
         rom_size = 32; // Fallback to 32KB
     printf("ROM Size: %d KB\n", rom_size);
@@ -119,90 +128,112 @@ void MBCSIM::load(const char *fname) {
     memset(ram, 0xff, MBC_RAM_SIZE);
 }
 
-void MBCSIM::apply(const uint8_t wr_data, const uint16_t address, 
-    const uint8_t wr, const uint8_t rd, uint8_t &rd_data) {
+void MBCSIM::apply(const uint8_t wr_data, const uint16_t address,
+                   const uint8_t wr, const uint8_t rd, uint8_t &rd_data)
+{
 
     // Address within ROM window or RAM window
-    if ((address <= 0x8000) || ((address >= 0xa000) && (address < 0xc000))) {
-        if (wr) {
-            if (address >= 0xa000) {
+    if ((address <= 0x8000) || ((address >= 0xa000) && (address < 0xc000)))
+    {
+        if (!wr)
+        {
+            if (address >= 0xa000)
+            {
                 // Write to RAM
-                if (ram_enable == 0x0a) {
-                    if ((mbc_type == MBC1) && (mbc_mode == 0)) {
+                if (ram_enable == 0x0a)
+                {
+                    if ((mbc_type == MBC1) && (mbc_mode == 0))
+                    {
                         ram[address - 0xa000] = wr_data;
                     }
-                    else {
+                    else
+                    {
                         ram[address - 0xa000 + ram_bank * 0x2000] = wr_data;
                     }
                 }
             }
-            else if (address < 0x2000) {
+            else if (address < 0x2000)
+            {
                 // RAM Enable (MBC1/3/5)
                 ram_enable = wr_data;
             }
-            else if (address < 0x4000) {
+            else if (address < 0x4000)
+            {
                 // ROM Bank (MBC1/3/5)
-                if (mbc_type == MBC1) {
+                if (mbc_type == MBC1)
+                {
                     rom_bank &= ~0x1f;
                     rom_bank = (unsigned int)wr_data & 0x1f;
                     if (wr_data == 0)
                         rom_bank |= 0x01;
                 }
-                else if (mbc_type == MBC3) {
+                else if (mbc_type == MBC3)
+                {
                     rom_bank &= ~0x7f;
                     rom_bank = (unsigned int)wr_data & 0x7f;
                     if (wr_data == 0)
                         rom_bank |= 0x01;
                 }
-                else if (mbc_type == MBC5) {
-                    if (address < 0x3000) {
+                else if (mbc_type == MBC5)
+                {
+                    if (address < 0x3000)
+                    {
                         rom_bank &= ~0xff;
                         rom_bank |= (unsigned int)wr_data & 0xff;
                     }
-                    else {
+                    else
+                    {
                         rom_bank &= ~0x100;
                         rom_bank |= ((unsigned int)wr_data & 0x01) << 8;
                     }
                 }
-                //printf("[MBC] Rom bank %d (%04x=%02x)\n", rom_bank, address, last_data);
+                // printf("[MBC] Rom bank %d (%04x=%02x)\n", rom_bank, address, last_data);
             }
-            else if (address < 0x6000) {
-                if ((mbc_type == MBC1) && (mbc_mode == 0)) {
+            else if (address < 0x6000)
+            {
+                if ((mbc_type == MBC1) && (mbc_mode == 0))
+                {
                     // High ROM Bank
                     rom_bank &= ~0xe0;
                     rom_bank |= ((unsigned int)wr_data & 0x03) << 5;
-                    //printf("[MBC] Rom bank %d (%04x=%02x)\n", rom_bank, address, last_data);
+                    // printf("[MBC] Rom bank %d (%04x=%02x)\n", rom_bank, address, last_data);
                 }
-                else {
+                else
+                {
                     // RAM Bank
                     ram_bank = wr_data;
-                    //printf("[MBC] Ram bank %d (%04x=%02x)\n", ram_bank, address, last_data);
+                    // printf("[MBC] Ram bank %d (%04x=%02x)\n", ram_bank, address, last_data);
                 }
             }
-            else if (address < 0x8000) {
+            else if (address < 0x8000)
+            {
                 mbc_mode = wr_data;
             }
-        } 
-        else if (rd) {
-            if (address < 0x4000) {
+        }
+        else if (!rd)
+        {
+            if (address < 0x4000)
+            {
                 // LoROM
                 rd_data = rom[address];
             }
-            else if (address < 0x8000) {
+            else if (address < 0x8000)
+            {
                 // HiROM
                 rd_data = rom[address - 0x4000 + rom_bank * 0x4000];
-                //printf("[MBC] Read from bank %d, %04x (%06x) = %02x\n", rom_bank, address, address - 0x4000 + rom_bank * 0x4000, rd_data);
+                // printf("[MBC] Read from bank %d, %04x (%06x) = %02x\n", rom_bank, address, address - 0x4000 + rom_bank * 0x4000, rd_data);
             }
-            else {
-                if ((mbc_type == MBC1) && (mbc_mode == 0)) {
+            else
+            {
+                if ((mbc_type == MBC1) && (mbc_mode == 0))
+                {
                     rd_data = ram[address - 0xa000];
                 }
-                else {
+                else
+                {
                     rd_data = ram[address - 0xa000 + ram_bank * 0x2000];
                 }
             }
         }
     }
 }
-
-
