@@ -1,0 +1,6 @@
+AF fec0
+BC 0070
+DE 00c0
+HL fe40
+SP c040
+PC 0018
