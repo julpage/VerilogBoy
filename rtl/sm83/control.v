@@ -51,6 +51,8 @@ module control(
     output reg       flags_we,
     output reg [1:0] flags_pattern,
     output reg       high_mask,
+    input      [4:0] int_en,
+    input      [4:0] int_flags_in,
     output           int_master_en,
     input            int_dispatch,
     output reg       int_ack,
@@ -264,7 +266,15 @@ module control(
                 comb_stop = 1;
             end
             else if (opcode == 8'h76) begin // HALT
-                comb_halt = 1;
+                if ((int_flags_in & int_en) == 0) begin
+                    comb_halt = 1;
+                end
+                else begin
+                    // halt bug
+                    if(!int_master_en) begin
+                        comb_ct_op = `CT_OP_IDLE;
+                    end
+                end
             end
             else if (opcode == 8'hF3) begin // DI
                 ime_clear = 1'b1;

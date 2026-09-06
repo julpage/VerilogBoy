@@ -19,5 +19,12 @@ roms/*.obj
 roms/*.mif
 roms/*.sym
 
+sim/.actual
+sim/audio.wav
+sim/*.txt
+sim/*.gb
+sim/*.gbc
+sim/*.sav
+
 
 
