@@ -1,0 +1,6 @@
+AF ff00
+BC ff80
+DE ffff
+HL 007f
+SP 0000
+PC 0017

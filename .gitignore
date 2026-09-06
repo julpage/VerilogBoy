@@ -12,3 +12,12 @@ rgbds/
 
 *.sav
 sim/bootrom.mif
+roms/tests/*.gb
+roms/tests/*.map
+roms/*.gb
+roms/*.obj
+roms/*.mif
+roms/*.sym
+
+
+

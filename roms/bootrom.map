@@ -1,0 +1,11 @@
+SUMMARY:
+	ROM0: 30 bytes used / 16354 free
+
+ROM0 bank #0:
+	SECTION: $0000-$001a ($001b bytes) ["rom"]
+	         $0007 = clear_vram_loop
+	EMPTY: $001b-$00fd ($00e3 bytes)
+	SECTION: $00fe-$0100 ($0003 bytes) ["final"]
+	         $00fe = addr_00fe
+	EMPTY: $0101-$3fff ($3eff bytes)
+	TOTAL EMPTY: $3fe2 bytes

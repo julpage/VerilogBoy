@@ -1,0 +1,6 @@
+AF ff00
+BC 0000
+DE 0000
+HL c030
+SP c030
+PC 004f

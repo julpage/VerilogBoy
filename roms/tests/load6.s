@@ -12,9 +12,9 @@ main:
 ;    ld D, A
     
     ld A, $02
-    ldh [$f0], A
+    ldh [$fff0], A
     xor A
-    ldh A, [$f0]
+    ldh A, [$fff0]
     ld E, A
     
     halt

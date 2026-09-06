@@ -33,7 +33,7 @@ my_array:
     or B                ; b0            1f
     ret NZ              ; c0            20
     ret NC              ; d0            21
-    ldh [$00f0], A      ; e0, f0, 00    22
+    ldh [$fff0], A      ; e0, f0, 00    22
     ; Last element at 0x0024
     
 code_area:

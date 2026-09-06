@@ -8,14 +8,14 @@ main:
     ld A, $01
     ld [$FF00+C], A
     xor A
-    ld A, [C]
+    ld A, C
     ld B, A
     
     ld C, $ff
     ld A, $02
-    ld [C], A
+    ld C, A
     xor A
-    ld A, [C]
+    ld A, C
     ld D, A
     
     halt
