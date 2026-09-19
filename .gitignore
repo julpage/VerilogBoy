@@ -1,5 +1,4 @@
 # Xilinx ISE files
-obj_dir/
 isim/
 _xmsgs/
 _ngo/
@@ -8,10 +7,11 @@ tmp/
 xst/
 top_*
 impact*
+
 rgbds/
 
 *.sav
-sim/bootrom.mif
+
 roms/tests/*.gb
 roms/tests/*.map
 roms/*.gb
@@ -19,6 +19,7 @@ roms/*.obj
 roms/*.mif
 roms/*.sym
 
+sim/bootrom.mif
 sim/.actual
 sim/audio.wav
 sim/*.txt
@@ -27,9 +28,11 @@ sim/*.gbc
 sim/*.sav
 sim/.vscode
 sim/obj
-
+sim/obj_dir
 
 rtl/bak
+rtl/*_tb.v
+
 
 
 

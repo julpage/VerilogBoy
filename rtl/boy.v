@@ -292,6 +292,7 @@ module boy(
         .clk             (clk),
         .rst             (rst),
         .doubleSpeedMode (1'd0),
+        .cpu_ct          (cpu_ct),
         .cpu_a           (cpu_a),
         .cpu_dout        (cpu_dout),
         .cpu_rd          (cpu_rd),
@@ -326,8 +327,8 @@ module boy(
         .right           (right)
     );
     
-
-
+    
+    
     // PPU
     wire [7:0]  reg_ppu;
     wire [7:0]  vram_dout;
@@ -496,7 +497,7 @@ module boy(
             cpu_din = reg_if;
         end
         /****************** Sound ******************/
-        // $FF10: NR10    |    $FF11: NR11    |    $FF12: NR12    |    $FF13: NR13    |    $FF14: NR14
+        // $FF10: NR10   |  $FF11: NR11   |  $FF12: NR12   |  $FF13: NR13   |  $FF14: NR14
         else if (cpu_a == 16'hff10) begin
             cpu_din = reg_nr10;
         end
@@ -512,7 +513,7 @@ module boy(
         else if (cpu_a == 16'hff14) begin
             cpu_din = reg_nr14;
         end
-        // $FF15: [N/A]   |    $FF16: NR21    |    $FF17: NR22    |    $FF18: NR23    |    $FF19: NR24
+        // $FF15: [N/A]  |  $FF16: NR21   |  $FF17: NR22   |  $FF18: NR23   |  $FF19: NR24
         else if (cpu_a == 16'hff16) begin
             cpu_din = reg_nr21;
         end
@@ -525,7 +526,7 @@ module boy(
         else if (cpu_a == 16'hff19) begin
             cpu_din = reg_nr24;
         end
-        // $FF1A: NR30    |    $FF1B: NR31    |    $FF1C: NR32    |    $FF1D: NR33    |    $FF1E: NR34
+        // $FF1A: NR30   |  $FF1B: NR31   |  $FF1C: NR32   |  $FF1D: NR33   |  $FF1E: NR34
         else if (cpu_a == 16'hff1a) begin
             cpu_din = reg_nr30;
         end
@@ -541,7 +542,7 @@ module boy(
         else if (cpu_a == 16'hff1e) begin
             cpu_din = reg_nr34;
         end
-        // $FF1F: [N/A]   |    $FF20: NR41    |    $FF21: NR42    |    $FF22: NR43    |    $FF23: NR44
+        // $FF1F: [N/A]  |  $FF20: NR41   |  $FF21: NR42   |  $FF22: NR43   |  $FF23: NR44
         else if (cpu_a == 16'hff20) begin
             cpu_din = reg_nr41;
         end
@@ -554,7 +555,7 @@ module boy(
         else if (cpu_a == 16'hff23) begin
             cpu_din = reg_nr44;
         end
-        // $FF24: NR50    |    $FF25: NR51    |    $FF26: NR52
+        // $FF24: NR50   |  $FF25: NR51   |  $FF26: NR52
         else if (cpu_a == 16'hff24) begin
             cpu_din = reg_nr50;
         end
@@ -573,9 +574,9 @@ module boy(
             cpu_din = reg_dma;
         end
         /****************** PPU ******************/
-        // $FF40    LCDC    |    $FF41    STAT    |    $FF42    SCY    |    $FF43    SCX
-        // $FF44    LY      |    $FF45    LYC     |    $ff46-$ff49    [N/A]
-        // $FF4A    WY      |    $FF4B    WX
+        // $FF40    LCDC   |  $FF41    STAT   |  $FF42    SCY   |  $FF43    SCX
+        // $FF44    LY     |  $FF45    LYC    |  $ff46-$ff49    [N/A]
+        // $FF4A    WY     |  $FF4B    WX
         else if (cpu_a >= 16'hff40 && cpu_a <= 16'hff4b) begin
             cpu_din = reg_ppu;
         end
@@ -586,6 +587,14 @@ module boy(
         // $FF70    SVBK/WBK    CGB
         else if (cpu_a == 16'hff07) begin
             cpu_din = reg_svbk;
+        end
+        // $FF76    PCM12    CGB
+        else if (cpu_a == 16'hff76) begin
+            cpu_din <= reg_pcm12;
+        end
+        // $FF77    PCM34    CGB
+        else if (cpu_a == 16'hff77) begin
+            cpu_din <= reg_pcm34;
         end
         // 0xFF80~0xfffe   High RAM
         else if ((16'hff80 <= cpu_a) && (cpu_a <= 16'hfffe)) begin

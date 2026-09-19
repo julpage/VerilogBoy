@@ -50,6 +50,10 @@ MMRPROBE::~MMRPROBE(void)
 
 const char *regNames(uint16_t regAddr)
 {
+    static char str[30];
+    // snprintf(str, sizeof(str), "%04x", regAddr);
+    // return str;
+
     switch (regAddr)
     {
     case 0xFF00:
@@ -126,7 +130,8 @@ const char *regNames(uint16_t regAddr)
     case 0xFF3D:
     case 0xFF3E:
     case 0xFF3F:
-        return "Wave RAM";
+        snprintf(str, sizeof(str), "Wave RAM %d", regAddr - 0xff30);
+        return str;
     case 0xFF40:
         return "LCDC";
     case 0xFF41:
@@ -190,7 +195,6 @@ const char *regNames(uint16_t regAddr)
     case 0xFFFF:
         return "IE";
     default:
-        static char str[30];
         snprintf(str, sizeof(str), "%04x", regAddr);
         return str;
     }
@@ -200,31 +204,70 @@ void printAPU(uint16_t regAddr)
 {
     if ((0xff10 <= regAddr) && (regAddr <= 0xff14))
     {
-        printf("\tch1 left: %d\tactive: %d\tclk256LV: %d\n",
+        printf("   ch1 left: %d\tactive: %d\tclk256LV: %d\tfreq: %x\tactiveSweep: %d\tclk128LV: %d\tcnt_iter: %d\tcin: %d\n",
                core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_length__DOT__length_left,
                core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__active_length,
-               core->rootp->boy__DOT__u_sound__DOT__apu_div & 1);
+               core->rootp->boy__DOT__u_sound__DOT__clk_256hz,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__sweep_period,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__active_sweep,
+               core->rootp->boy__DOT__u_sound__DOT__clk_128hz,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__cnt_iter,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__calculatedInNegate);
     }
     if ((0xff15 <= regAddr) && (regAddr <= 0xff19))
     {
-        printf("\tch2 left: %d\tactive: %d\tclk256LV: %d\n",
+        printf("   ch2 left: %d\tactive: %d\tclk256LV: %d\n",
                core->rootp->boy__DOT__u_sound__DOT__u_channel2__DOT__u_length__DOT__length_left,
                core->rootp->boy__DOT__u_sound__DOT__u_channel2__DOT__active_length,
-               core->rootp->boy__DOT__u_sound__DOT__apu_div & 1);
+               core->rootp->boy__DOT__u_sound__DOT__clk_256hz);
     }
     if ((0xff1a <= regAddr) && (regAddr <= 0xff1e))
     {
-        printf("\tch3 left: %d\tactive: %d\tclk256LV: %d\n",
+        printf("   ch3 left: %d\tactive: %d\tclk256LV: %d\n",
                core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__u_length__DOT__length_left,
                core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__active_length,
-               core->rootp->boy__DOT__u_sound__DOT__apu_div & 1);
+               core->rootp->boy__DOT__u_sound__DOT__clk_256hz);
     }
     if ((0xff1f <= regAddr) && (regAddr <= 0xff23))
     {
-        printf("\tch4 left: %d\tactive: %d\tclk256LV: %d\n",
+        printf("   ch4 left: %d\tactive: %d\tclk256LV: %d\n",
                core->rootp->boy__DOT__u_sound__DOT__u_channel4__DOT__u_length__DOT__length_left,
                core->rootp->boy__DOT__u_sound__DOT__u_channel4__DOT__active_length,
-               core->rootp->boy__DOT__u_sound__DOT__apu_div & 1);
+               core->rootp->boy__DOT__u_sound__DOT__clk_256hz);
+    }
+    if (regAddr == 0xff26)
+    {
+        printf("   ch1 left: %d\tactive: %d\tclk256LV: %d\tch1 freq: %x\tactiveSweep: %d\tclk128LV: %d\tcnt_iter: %d\tcin: %d\n",
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_length__DOT__length_left,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__active_length,
+               core->rootp->boy__DOT__u_sound__DOT__clk_256hz,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__sweep_period,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__active_sweep,
+               core->rootp->boy__DOT__u_sound__DOT__clk_128hz,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__cnt_iter,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__calculatedInNegate);
+        // printf("   ch4 left: %d\tactive: %d\tclk256LV: %d\tch1 freq: %x\tactiveSweep: %d\tclk128LV: %d\tcnt_iter: %d\tcin: %d\n",
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel4__DOT__u_length__DOT__length_left,
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel4__DOT__active_length,
+        //        core->rootp->boy__DOT__u_sound__DOT__clk_256hz,
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__sweep_period,
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__active_sweep,
+        //        core->rootp->boy__DOT__u_sound__DOT__clk_128hz,
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__cnt_iter,
+        //        core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__calculatedInNegate);
+        uint16_t de = ((core->rootp->boy__DOT__u_cpu__DOT__regfile__DOT__regs[2]) << 8) | (core->rootp->boy__DOT__u_cpu__DOT__regfile__DOT__regs[3]);
+        printf("    DE: %04x %d\n", de, de);
+        // printf("initial_period_latched: %x\n", core->rootp->boy__DOT__u_sound__DOT__u_channel1__DOT__u_sweep__DOT__initial_period_latched);
+    }
+    if ((0xff30 <= regAddr) && (regAddr <= 0xff3f))
+    {
+        printf("    ch3 active:%d    cnt_waveGen: %d    sampIndex: %d    period:%x\n",
+               core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__active_length,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__cnt_waveGen,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__sampIndex,
+               core->rootp->boy__DOT__u_sound__DOT__u_channel3__DOT__period);
+        uint16_t de = ((core->rootp->boy__DOT__u_cpu__DOT__regfile__DOT__regs[2]) << 8) | (core->rootp->boy__DOT__u_cpu__DOT__regfile__DOT__regs[3]);
+        printf("    DE: %04x %d\n", de, de);
     }
 }
 
@@ -242,6 +285,11 @@ void MMRPROBE::apply(uint8_t wr_data, uint16_t address,
 
     timeStamp /= 4;
 
+    if (wr_enable)
+    {
+        lastIsRd = false;
+    }
+
     // Ignore ROM and HRAM RW
     if (last_wr && !wr_enable)
     {
@@ -254,7 +302,6 @@ void MMRPROBE::apply(uint8_t wr_data, uint16_t address,
                    timeStamp,
                    timeStamp - lastTimeStamp);
             // printf("%ld  %ld\n", timeStamp, lastTimeStamp);
-            lastIsRd = false;
             lastTimeStamp = timeStamp;
 
             printAPU(address);
@@ -263,6 +310,8 @@ void MMRPROBE::apply(uint8_t wr_data, uint16_t address,
     else if (last_rd && !rd_enable)
     {
         if (lastIsRd && (address == lastAddr) && (lastRdData == rd_data))
+            // if ((address != 0xff26) && lastIsRd && (address == lastAddr) && (lastRdData == rd_data))
+            // if ((address < 0xFF30) && (0xFF3F < address) && lastIsRd && (address == lastAddr) && (lastRdData == rd_data))
             return;
         if ((address >= 0x8000) && (address <= 0xff7f) && (address != 0xff44))
         {
